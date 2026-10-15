@@ -330,6 +330,7 @@ class AureliaBackend(QObject):
     launchOptionsChanged = pyqtSignal()
     presenceChanged = pyqtSignal()
     presenceModeChanged = pyqtSignal()
+    unreadChanged = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -405,6 +406,10 @@ class AureliaBackend(QObject):
     def presenceText(self):
         return self._presence
 
+    @pyqtProperty(int, notify=unreadChanged)
+    def unreadTotal(self):
+        return sum(self._unread.values())
+
     @pyqtProperty(str, notify=presenceModeChanged)
     def presenceMode(self):
         return self._presence_mode
@@ -466,6 +471,7 @@ class AureliaBackend(QObject):
         self.gamesStatusChanged.emit()
 
     def _sync_friend_items(self, rows: list[dict]):
+        self.unreadChanged.emit()
         query = self._friend_filter.lower()
         items = []
         for f in rows:

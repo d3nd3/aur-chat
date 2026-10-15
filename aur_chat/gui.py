@@ -7,8 +7,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PyQt6.QtCore import QLockFile, QUrl, pyqtSlot
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtCore import QLockFile, QRectF, QSize, Qt, QUrl, pyqtSlot
+from PyQt6.QtGui import QAction, QBrush, QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtQml import QQmlApplicationEngine
 from PyQt6.QtQuick import QQuickWindow
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -24,6 +24,26 @@ def _icon() -> QIcon:
     if _ICON.is_file():
         return QIcon(str(_ICON))
     return QIcon.fromTheme("internet-chat", QIcon.fromTheme("user-available"))
+
+
+def _badge_icon(base: QIcon, count: int) -> QIcon:
+    if count <= 0:
+        return base
+    pm = base.pixmap(QSize(64, 64))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    d = pm.width() * 0.6
+    r = QRectF(pm.width() - d, pm.height() - d, d, d)
+    p.setPen(QColor("white"))
+    p.setBrush(QBrush(QColor("#e01b24")))
+    p.drawEllipse(r)
+    font = QFont()
+    font.setBold(True)
+    font.setPixelSize(int(d * 0.6))
+    p.setFont(font)
+    p.drawText(r, Qt.AlignmentFlag.AlignCenter, "9+" if count > 9 else str(count))
+    p.end()
+    return QIcon(pm)
 
 
 def _acquire_instance_lock() -> QLockFile | None:
@@ -56,7 +76,9 @@ class _TrayHost(QApplication):
         self._tray_menu.aboutToShow.connect(self._ensure_tray_games)
         self._backend.gamesListChanged.connect(self._update_tray_games)
         self._backend.presenceChanged.connect(self._update_presence)
+        self._backend.unreadChanged.connect(self._update_unread)
         self._update_presence()
+        self._update_unread()
         self._update_tray_games()
         self._tray_menu.addAction("Refresh games", self._refresh_tray_games)
         self._tray_menu.addAction("Refresh", self._backend.refreshFriends)
@@ -73,7 +95,13 @@ class _TrayHost(QApplication):
     def _update_presence(self):
         text = self._backend.presenceText
         self._tray_status.setText(f"Status: {text}")
-        self._tray.setToolTip(f"aur-chat · {text}")
+        self._update_unread()
+
+    def _update_unread(self):
+        n = self._backend.unreadTotal
+        self._tray.setIcon(_badge_icon(_icon(), n))
+        tip = f"aur-chat · {n} unread" if n else "aur-chat"
+        self._tray.setToolTip(f"{tip} · {self._backend.presenceText}")
 
     def _ensure_tray_games(self):
         if self._tray_games_requested or self._backend.gameItems:
