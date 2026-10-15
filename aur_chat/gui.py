@@ -26,22 +26,29 @@ def _icon() -> QIcon:
     return QIcon.fromTheme("internet-chat", QIcon.fromTheme("user-available"))
 
 
-def _badge_icon(base: QIcon, count: int) -> QIcon:
-    if count <= 0:
+def _badge(p: QPainter, size: float, corner_x: float, corner_y: float, color: str, text: str):
+    r = QRectF(corner_x, corner_y, size, size)
+    p.setPen(QColor("white"))
+    p.setBrush(QBrush(QColor(color)))
+    p.drawEllipse(r)
+    font = QFont()
+    font.setBold(True)
+    font.setPixelSize(int(size * 0.6))
+    p.setFont(font)
+    p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
+
+
+def _status_icon(base: QIcon, unread: int, downloading: int) -> QIcon:
+    if not unread and not downloading:
         return base
     pm = base.pixmap(QSize(64, 64))
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    d = pm.width() * 0.6
-    r = QRectF(pm.width() - d, pm.height() - d, d, d)
-    p.setPen(QColor("white"))
-    p.setBrush(QBrush(QColor("#e01b24")))
-    p.drawEllipse(r)
-    font = QFont()
-    font.setBold(True)
-    font.setPixelSize(int(d * 0.6))
-    p.setFont(font)
-    p.drawText(r, Qt.AlignmentFlag.AlignCenter, "9+" if count > 9 else str(count))
+    d = pm.width() * 0.5
+    if downloading:  # blue down-arrow badge, bottom-left
+        _badge(p, d, 0, pm.height() - d, "#1c71d8", "\u2193")
+    if unread:  # red unread count, bottom-right
+        _badge(p, d, pm.width() - d, pm.height() - d, "#e01b24", "9+" if unread > 9 else str(unread))
     p.end()
     return QIcon(pm)
 
@@ -77,6 +84,7 @@ class _TrayHost(QApplication):
         self._backend.gamesListChanged.connect(self._update_tray_games)
         self._backend.presenceChanged.connect(self._update_presence)
         self._backend.unreadChanged.connect(self._update_unread)
+        self._backend.updatingChanged.connect(self._update_unread)
         self._update_presence()
         self._update_unread()
         self._update_tray_games()
@@ -98,10 +106,13 @@ class _TrayHost(QApplication):
         self._update_unread()
 
     def _update_unread(self):
-        n = self._backend.unreadTotal
-        self._tray.setIcon(_badge_icon(_icon(), n))
-        tip = f"aur-chat · {n} unread" if n else "aur-chat"
-        self._tray.setToolTip(f"{tip} · {self._backend.presenceText}")
+        n, d = self._backend.unreadTotal, self._backend.updatingCount
+        self._tray.setIcon(_status_icon(_icon(), n, d))
+        parts = [f"{n} unread"] if n else []
+        if d:
+            parts.append(f"{d} downloading")
+        tip = " · ".join(["aur-chat", *parts, self._backend.presenceText])
+        self._tray.setToolTip(tip)
 
     def _ensure_tray_games(self):
         if self._tray_games_requested or self._backend.gameItems:

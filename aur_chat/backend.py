@@ -331,6 +331,7 @@ class AureliaBackend(QObject):
     presenceChanged = pyqtSignal()
     presenceModeChanged = pyqtSignal()
     unreadChanged = pyqtSignal()
+    updatingChanged = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -405,6 +406,10 @@ class AureliaBackend(QObject):
     @pyqtProperty(str, notify=presenceChanged)
     def presenceText(self):
         return self._presence
+
+    @pyqtProperty(int, notify=updatingChanged)
+    def updatingCount(self):
+        return len(self._updating)
 
     @pyqtProperty(int, notify=unreadChanged)
     def unreadTotal(self):
@@ -611,6 +616,8 @@ class AureliaBackend(QObject):
         except (OSError, AttributeError):
             finished = True
         if finished:
+            if self._local_game:
+                desktop_notify("aur-chat", f"{self._local_game} closed")
             self._local_game_process = None
             self._local_game = ""
             self._local_app_id = ""
@@ -642,6 +649,7 @@ class AureliaBackend(QObject):
         if isinstance(data, dict) and not data.get("error"):
             self._stop_force = False
             self._set_status(f"Ended {name}")
+            desktop_notify("aur-chat", f"Ended {name}")
             QTimer.singleShot(2000, self.refreshFriends)
         else:
             process = self._local_game_process
@@ -817,20 +825,25 @@ class AureliaBackend(QObject):
         self._updating.add(app_id)
         self._apply_update_states()
         self.gamesListChanged.emit()
+        self.updatingChanged.emit()
         self._set_status(f"Updating {name}… (this can take a while)")
+        desktop_notify("aur-chat", f"Download started: {name}")
         self._update_worker = _Fetch(aurelia.update_game, app_id)
         self._update_worker.done.connect(lambda d, a=app_id, n=name: self._on_update_done(a, n, d))
         self._update_worker.start()
 
     def _on_update_done(self, app_id: str, name: str, data: Any):
         self._updating.discard(app_id)
+        self.updatingChanged.emit()
         ok = isinstance(data, dict) and not data.get("error")
         if ok:
             self._updates.discard(app_id)
             self._set_status(f"{name} updated")
+            desktop_notify("aur-chat", f"Download finished: {name}")
         else:
             err = data.get("error", "update failed") if isinstance(data, dict) else "update failed"
             self._set_status(str(err)[:160])
+            desktop_notify("aur-chat", f"Download stopped: {name}", urgency="critical")
         self._apply_update_states()
         self.gamesListChanged.emit()
         self.refreshUpdates()
@@ -887,6 +900,7 @@ class AureliaBackend(QObject):
                 self._track_local_game(row["name"], process, app_id)
                 tool = row.get("compatTool") or "native"
                 self._set_games_status(f"Launching {row['name']} directly ({tool})…")
+                desktop_notify("aur-chat", f"Launching {row['name']}")
             except OSError as e:
                 print(f"[aur-chat] shortcut launch failed: {e}", file=sys.stderr, flush=True)
                 self._set_games_status(str(e))
@@ -899,6 +913,7 @@ class AureliaBackend(QObject):
             process = aurelia.play_game(app_id)
             self._track_local_game(name, process, app_id)
             self._set_games_status(f"Launching {name}…")
+            desktop_notify("aur-chat", f"Launching {name}")
         except OSError as e:
             self._set_games_status(str(e))
 
