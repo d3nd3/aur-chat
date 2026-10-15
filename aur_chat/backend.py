@@ -817,7 +817,8 @@ class AureliaBackend(QObject):
                 state = "Up to date" if self._updates_checked else ""
             g["updateState"] = state
             g["updatable"] = state == "Update available"
-            g["updatePercent"] = self._progress.get(app_id, -1) if app_id in self._updating else -1
+            g["updating"] = app_id in self._updating
+            g["updateText"] = f"{self._progress.get(app_id, 0) / 1e9:.2f} GB downloaded" if g["updating"] else ""
 
     @pyqtSlot()
     def refreshUpdates(self):
@@ -860,11 +861,11 @@ class AureliaBackend(QObject):
         self._update_worker.done.connect(lambda d, a=app_id, n=name: self._on_update_done(a, n, d))
         self._update_worker.start()
 
-    def _set_progress(self, app_id: str, pct: float):
+    def _set_progress(self, app_id: str, done: float):
         old = self._progress.get(app_id)
-        if old is not None and abs(pct - old) < 0.5 and pct < 100:
+        if old is not None and done - old < 1e8:
             return
-        self._progress[app_id] = pct
+        self._progress[app_id] = done
         self._apply_update_states()
         self.gamesListChanged.emit()
 

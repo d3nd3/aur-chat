@@ -131,7 +131,9 @@ def update_game(app_id: str) -> Any:
     return run_json(["update", str(app_id)], timeout=3600)
 
 
-_PROGRESS = re.compile(r"Downloading:\s+(\d+(?:\.\d+)?)% overall")
+# Aurelia's "% overall" uses a total that grows as depots are queued, so it jumps backwards.
+# The byte counts (done/total) are reliable, so we report those instead.
+_PROGRESS = re.compile(r"Downloading:\s+\S+% overall\s+(\d+)/\d+ bytes")
 
 
 def update_game_progress(app_id: str, on_progress) -> Any:

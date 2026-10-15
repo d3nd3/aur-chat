@@ -488,11 +488,14 @@ Kirigami.ApplicationWindow {
                                             : Kirigami.Theme.positiveTextColor
                                     }
                                     QQC2.ProgressBar {
-                                        visible: modelData.updatePercent >= 0
+                                        visible: !!modelData.updating
                                         Layout.fillWidth: true
-                                        from: 0
-                                        to: 100
-                                        value: modelData.updatePercent
+                                        indeterminate: true
+                                    }
+                                    Text {
+                                        visible: !!modelData.updateText
+                                        text: modelData.updateText || ""
+                                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                                     }
                                     Text {
                                         text: {
