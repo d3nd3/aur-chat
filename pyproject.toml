@@ -1,0 +1,20 @@
+[project]
+name = "aur-chat"
+version = "0.2.0"
+description = "Lightweight Steam chat GUI for Aurelia on KDE Plasma"
+requires-python = ">=3.11"
+dependencies = ["PyQt6>=6.6", "vdf>=3.4"]
+
+[project.scripts]
+aur-chat = "aur_chat.gui:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aur_chat*"]
+
+[tool.setuptools.package-data]
+aur_chat = ["qml/*.qml"]

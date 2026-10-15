@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=aur-chat
+GenericName=Steam Chat
+Comment=Lightweight Steam friends chat via Aurelia
+Exec=aur-chat
+Icon=aur-chat
+Terminal=false
+Categories=Network;Chat;InstantMessaging;
+Keywords=steam;chat;aurelia;friends;
+StartupWMClass=aur-chat
+X-KDE-StartupNotify=true
