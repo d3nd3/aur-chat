@@ -340,6 +340,7 @@ class AureliaBackend(QObject):
         self._presence_pin_until = 0.0  # ignore stale profile reads right after a change
         self._steam_game = ""
         self._steam_app_id = ""
+        self._local_app_id = ""
         self._stop_worker: _Fetch | None = None
         self._stop_force = False
         self._local_game = ""
@@ -589,8 +590,9 @@ class AureliaBackend(QObject):
         self._steam_app_id = str(profile.get("game_app_id") or "")
         self._render_presence()
 
-    def _track_local_game(self, name: str, process: Any):
+    def _track_local_game(self, name: str, process: Any, app_id: str = ""):
         self._local_game = name
+        self._local_app_id = app_id
         self._local_game_process = process
         self._render_presence()
 
@@ -605,6 +607,7 @@ class AureliaBackend(QObject):
         if finished:
             self._local_game_process = None
             self._local_game = ""
+            self._local_app_id = ""
             self._render_presence()
 
     @pyqtProperty(bool, notify=presenceChanged)
@@ -617,11 +620,13 @@ class AureliaBackend(QObject):
 
     @pyqtSlot()
     def endGame(self):
-        app_id = self._steam_app_id
-        if not app_id or (self._stop_worker and self._stop_worker.isRunning()):
-            self._set_status("Can't identify the running game to end")
+        app_id = self._local_app_id or self._steam_app_id
+        if self._stop_worker and self._stop_worker.isRunning():
             return
         name = self._local_game or self._steam_game
+        if not app_id:
+            self._on_game_stopped(name, {"error": "unknown app id"})
+            return
         self._stop_worker = _Fetch(aurelia.stop_game, app_id, force=self._stop_force)
         self._stop_worker.done.connect(lambda d, n=name: self._on_game_stopped(n, d))
         self._set_status(f"Ending {name}…")
@@ -633,9 +638,15 @@ class AureliaBackend(QObject):
             self._set_status(f"Ended {name}")
             QTimer.singleShot(2000, self.refreshFriends)
         else:
-            self._stop_force = True
-            err = data.get("error", "stop failed") if isinstance(data, dict) else "stop failed"
-            self._set_status(f"{str(err)[:140]} — press Force end to kill it")
+            process = self._local_game_process
+            if process and process.poll() is None:
+                process.terminate()
+                self._stop_force = False
+                self._set_status(f"Terminated the launcher for {name}")
+            else:
+                self._stop_force = True
+                err = data.get("error", "stop failed") if isinstance(data, dict) else "stop failed"
+                self._set_status(f"{str(err)[:140]} — press Force end to kill it")
         self.presenceChanged.emit()
 
     @pyqtSlot(str)
@@ -867,7 +878,7 @@ class AureliaBackend(QObject):
         if row and row.get("isShortcut"):
             try:
                 process = steam_shortcuts.launch_shortcut(app_id)
-                self._track_local_game(row["name"], process)
+                self._track_local_game(row["name"], process, app_id)
                 tool = row.get("compatTool") or "native"
                 self._set_games_status(f"Launching {row['name']} directly ({tool})…")
             except OSError as e:
@@ -880,7 +891,7 @@ class AureliaBackend(QObject):
         try:
             name = row["name"] if row else app_id
             process = aurelia.play_game(app_id)
-            self._track_local_game(name, process)
+            self._track_local_game(name, process, app_id)
             self._set_games_status(f"Launching {name}…")
         except OSError as e:
             self._set_games_status(str(e))
