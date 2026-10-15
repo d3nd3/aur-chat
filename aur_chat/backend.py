@@ -351,7 +351,7 @@ class AureliaBackend(QObject):
     presenceModeChanged = pyqtSignal()
     unreadChanged = pyqtSignal()
     updatingChanged = pyqtSignal()
-    _progressSig = pyqtSignal(str, float)
+    _progressSig = pyqtSignal(str, float, float, str)
 
     def __init__(self):
         super().__init__()
@@ -390,7 +390,7 @@ class AureliaBackend(QObject):
         self._games_status = ""
         self._updates: set[str] = set()
         self._updating: set[str] = set()
-        self._progress: dict[str, float] = {}
+        self._progress: dict[str, tuple] = {}
         self._progressSig.connect(self._set_progress)
         self._updates_checked = False
         self._check_worker: _Fetch | None = None
@@ -817,7 +817,7 @@ class AureliaBackend(QObject):
             g["updateState"] = state
             g["updatable"] = state == "Update available"
             g["updating"] = app_id in self._updating
-            g["updateText"] = f"{self._progress.get(app_id, 0) / 1e9:.2f} GB downloaded" if g["updating"] else ""
+            g["updateText"] = self._progress.get(app_id, ("",))[-1] if g["updating"] else ""
 
     @pyqtSlot()
     def refreshUpdates(self):
@@ -855,16 +855,17 @@ class AureliaBackend(QObject):
         self._set_status(f"Updating {name}… (this can take a while)")
         desktop_notify("aur-chat", f"Download started: {name}")
         self._update_worker = _Fetch(
-            aurelia.update_game_progress, app_id, lambda pct, a=app_id: self._progressSig.emit(a, pct)
+            aurelia.update_game_progress, app_id, lambda d, n, sp, a=app_id: self._progressSig.emit(a, d, n, sp)
         )
         self._update_worker.done.connect(lambda d, a=app_id, n=name: self._on_update_done(a, n, d))
         self._update_worker.start()
 
-    def _set_progress(self, app_id: str, done: float):
+    def _set_progress(self, app_id: str, done: float, total: float, speed: str):
         old = self._progress.get(app_id)
-        if old is not None and done - old < 1e8:
+        if old is not None and done - old[0] < 1e8:
             return
-        self._progress[app_id] = done
+        text = f"{done / 1e9:.2f} of {total / 1e9:.2f} GB" + (f" · {speed}" if speed else "")
+        self._progress[app_id] = (done, text)
         self._apply_update_states()
         self.gamesListChanged.emit()
 

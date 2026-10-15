@@ -133,7 +133,8 @@ def update_game(app_id: str) -> Any:
 
 # Aurelia's "% overall" uses a total that grows as depots are queued, so it jumps backwards.
 # The byte counts (done/total) are reliable, so we report those instead.
-_PROGRESS = re.compile(r"Downloading:\s+\S+% overall\s+(\d+)/\d+ bytes")
+_PROGRESS = re.compile(r"Downloading:\s+\S+% overall\s+(\d+)/(\d+) bytes([^\r\n]*)")
+_SPEED = re.compile(r"(\d+(?:\.\d+)?) (\w+)/s")
 
 
 def _update_running(app_id: str) -> bool:
@@ -172,7 +173,9 @@ def update_game_progress(app_id: str, on_progress) -> Any:
                 tail = (tail + text)[-400:]
                 matches = _PROGRESS.findall(tail)
                 if matches:
-                    on_progress(float(matches[-1]))
+                    done, total, rest = matches[-1]
+                    sp = _SPEED.search(rest)
+                    on_progress(float(done), float(total), f"{sp[1]} {sp[2]}/s" if sp else "")
                     tail = tail[-120:]
             elif (proc.poll() is not None) if proc else not _update_running(app_id):
                 break
