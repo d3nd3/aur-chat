@@ -487,6 +487,13 @@ Kirigami.ApplicationWindow {
                                         color: modelData.updatable ? Kirigami.Theme.neutralTextColor
                                             : Kirigami.Theme.positiveTextColor
                                     }
+                                    QQC2.ProgressBar {
+                                        visible: modelData.updatePercent >= 0
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: 100
+                                        value: modelData.updatePercent
+                                    }
                                     Text {
                                         text: {
                                             const o = modelData.launchOptions || ""

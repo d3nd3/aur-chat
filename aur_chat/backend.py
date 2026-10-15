@@ -332,6 +332,7 @@ class AureliaBackend(QObject):
     presenceModeChanged = pyqtSignal()
     unreadChanged = pyqtSignal()
     updatingChanged = pyqtSignal()
+    _progressSig = pyqtSignal(str, float)
 
     def __init__(self):
         super().__init__()
@@ -370,6 +371,8 @@ class AureliaBackend(QObject):
         self._games_status = ""
         self._updates: set[str] = set()
         self._updating: set[str] = set()
+        self._progress: dict[str, float] = {}
+        self._progressSig.connect(self._set_progress)
         self._updates_checked = False
         self._check_worker: _Fetch | None = None
         self._update_worker: _Fetch | None = None
@@ -787,13 +790,15 @@ class AureliaBackend(QObject):
             if g.get("isShortcut") or not g["installed"]:
                 state = ""
             elif app_id in self._updating:
-                state = "Updating…"
+                pct = self._progress.get(app_id)
+                state = f"Updating… {pct:.0f}%" if pct is not None else "Updating…"
             elif app_id in self._updates:
                 state = "Update available"
             else:
                 state = "Up to date" if self._updates_checked else ""
             g["updateState"] = state
             g["updatable"] = state == "Update available"
+            g["updatePercent"] = self._progress.get(app_id, -1) if app_id in self._updating else -1
 
     @pyqtSlot()
     def refreshUpdates(self):
@@ -828,12 +833,23 @@ class AureliaBackend(QObject):
         self.updatingChanged.emit()
         self._set_status(f"Updating {name}… (this can take a while)")
         desktop_notify("aur-chat", f"Download started: {name}")
-        self._update_worker = _Fetch(aurelia.update_game, app_id)
+        self._update_worker = _Fetch(
+            aurelia.update_game_progress, app_id, lambda pct, a=app_id: self._progressSig.emit(a, pct)
+        )
         self._update_worker.done.connect(lambda d, a=app_id, n=name: self._on_update_done(a, n, d))
         self._update_worker.start()
 
+    def _set_progress(self, app_id: str, pct: float):
+        old = self._progress.get(app_id)
+        if old is not None and abs(pct - old) < 0.5 and pct < 100:
+            return
+        self._progress[app_id] = pct
+        self._apply_update_states()
+        self.gamesListChanged.emit()
+
     def _on_update_done(self, app_id: str, name: str, data: Any):
         self._updating.discard(app_id)
+        self._progress.pop(app_id, None)
         self.updatingChanged.emit()
         ok = isinstance(data, dict) and not data.get("error")
         if ok:

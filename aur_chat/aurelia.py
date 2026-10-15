@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -127,6 +128,34 @@ def updates() -> Any:
 
 def update_game(app_id: str) -> Any:
     return run_json(["update", str(app_id)], timeout=3600)
+
+
+_PROGRESS = re.compile(r"Downloading:\s+(\d+(?:\.\d+)?)% overall")
+
+
+def update_game_progress(app_id: str, on_progress) -> Any:
+    proc = subprocess.Popen(
+        [BIN, "update", str(app_id), "-v"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    tail, out = "", []
+    fd = proc.stdout.fileno()
+    while chunk := os.read(fd, 4096):
+        text = chunk.decode("utf-8", "replace")
+        out.append(text)
+        tail = (tail + text)[-400:]
+        matches = _PROGRESS.findall(tail)
+        if matches:
+            on_progress(float(matches[-1]))
+            tail = tail[-120:]
+    code = proc.wait()
+    if code == 0:
+        return {"ok": True}
+    lines = [l.strip() for l in "".join(out).splitlines() if l.strip()]
+    return {"error": (lines[-1] if lines else f"update exited {code}")[:160]}
 
 
 def stop_game(app_id: str, *, force: bool = False) -> Any:
