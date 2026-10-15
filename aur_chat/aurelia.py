@@ -113,7 +113,7 @@ def list_games(*, search: str = "", installed_only: bool = False) -> Any:
 
 def play_game(app_id: str) -> subprocess.Popen:
     return subprocess.Popen(
-        [BIN, "play", str(app_id)],
+        [BIN, "play", str(app_id), "--steam"],
         start_new_session=True,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
