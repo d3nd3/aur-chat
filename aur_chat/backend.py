@@ -6,6 +6,8 @@ import sys
 import tempfile
 import time
 from datetime import datetime
+from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -173,6 +175,23 @@ def _download_image(url: str) -> QImage:
         if not image.loadFromData(response.read()):
             raise ValueError("downloaded file is not an image")
         return image
+
+
+_STEAM_CONTENT_LOG = Path.home() / ".steam/debian-installation/logs/content_log.txt"
+_STEAM_STATE = re.compile(r"AppID (\d+) state changed : (.*)")
+
+
+def _steam_update_pending(app_ids: set[str]) -> set[str]:
+    """Apps whose latest Steam state (from its content log) still says Update Required."""
+    try:
+        last: dict[str, str] = {}
+        with _STEAM_CONTENT_LOG.open(errors="replace") as f:
+            for line in f:
+                if m := _STEAM_STATE.search(line):
+                    last[m.group(1)] = m.group(2)
+    except OSError:
+        return set()
+    return {a for a in app_ids if "Update Required" in last.get(a, "")}
 
 
 class _Fetch(QThread):
@@ -813,7 +832,9 @@ class AureliaBackend(QObject):
             err = data.get("error", "could not check updates") if isinstance(data, dict) else "could not check updates"
             self._set_status(str(err)[:160])
             return
+        installed = {g["appId"] for g in self._game_items if g["installed"] and not g.get("isShortcut")}
         self._updates = {str(u.get("app_id")) for u in data["updates"]}
+        self._updates |= _steam_update_pending(installed)
         self._updates_checked = True
         self._apply_update_states()
         self.gamesListChanged.emit()
