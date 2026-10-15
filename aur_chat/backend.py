@@ -178,20 +178,31 @@ def _download_image(url: str) -> QImage:
 
 
 _STEAM_CONTENT_LOG = Path.home() / ".steam/debian-installation/logs/content_log.txt"
-_STEAM_STATE = re.compile(r"AppID (\d+) state changed : (.*)")
+_STEAM_STATE = re.compile(r"\[([\d-]+ [\d:]+)\] AppID (\d+) state changed : (.*)")
 
 
 def _steam_update_pending(app_ids: set[str]) -> set[str]:
-    """Apps whose latest Steam state (from its content log) still says Update Required."""
+    """Apps whose latest Steam log state says Update Required and is newer than their app manifest."""
     try:
-        last: dict[str, str] = {}
+        last: dict[str, tuple[str, str]] = {}
         with _STEAM_CONTENT_LOG.open(errors="replace") as f:
             for line in f:
                 if m := _STEAM_STATE.search(line):
-                    last[m.group(1)] = m.group(2)
+                    last[m.group(2)] = (m.group(1), m.group(3))
     except OSError:
         return set()
-    return {a for a in app_ids if "Update Required" in last.get(a, "")}
+    steamapps = _STEAM_CONTENT_LOG.parent.parent / "steamapps"
+
+    def pending(app_id: str) -> bool:
+        if app_id not in last or "Update Required" not in last[app_id][1]:
+            return False
+        try:  # Steam's log goes stale when Steam is closed; a newer manifest means it's been updated
+            manifest = (steamapps / f"appmanifest_{app_id}.acf").stat().st_mtime
+        except OSError:
+            return True
+        return datetime.strptime(last[app_id][0], "%Y-%m-%d %H:%M:%S").timestamp() > manifest
+
+    return {a for a in app_ids if pending(a)}
 
 
 class _Fetch(QThread):
