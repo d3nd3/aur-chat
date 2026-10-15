@@ -136,35 +136,41 @@ def update_game(app_id: str) -> Any:
 _PROGRESS = re.compile(r"Downloading:\s+\S+% overall\s+(\d+)/\d+ bytes")
 
 
+def _update_running(app_id: str) -> bool:
+    return subprocess.run(["pgrep", "-f", f"aurelia update {app_id}( |$)"], stdout=subprocess.DEVNULL).returncode == 0
+
+
 def update_game_progress(app_id: str, on_progress) -> Any:
     # Output goes to a log file, not a pipe, so the update survives aur-chat closing.
     log = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "aur-chat"
     log.mkdir(parents=True, exist_ok=True)
     path = log / f"update-{app_id}.log"
-    with path.open("wb") as out:
-        proc = subprocess.Popen(
-            [BIN, "update", str(app_id), "-v"],
-            stdin=subprocess.DEVNULL,
-            stdout=out,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    tail, pos = "", 0
+    proc = None
+    # Attach to an update already running (e.g. started from the CLI) instead of failing.
+    if not _update_running(app_id):
+        with path.open("ab") as out:
+            proc = subprocess.Popen(
+                [BIN, "update", str(app_id), "-v"],
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+    tail = ""
     with path.open("rb") as r:
         while True:
             text = r.read().decode("utf-8", "replace")
-            pos += len(text)
             if text:
                 tail = (tail + text)[-400:]
                 matches = _PROGRESS.findall(tail)
                 if matches:
                     on_progress(float(matches[-1]))
                     tail = tail[-120:]
-            elif proc.poll() is not None:
+            elif (proc.poll() is not None) if proc else not _update_running(app_id):
                 break
             else:
                 time.sleep(0.3)
-    if proc.returncode == 0:
+    if proc is None or proc.returncode == 0:
         return {"ok": True}
     lines = [l.strip() for l in path.read_text(errors="replace").splitlines() if l.strip()]
     return {"error": (lines[-1] if lines else f"update exited {proc.returncode}")[:160]}
