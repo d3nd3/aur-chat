@@ -182,7 +182,8 @@ def update_game_progress(app_id: str, on_progress) -> Any:
     failed = proc.returncode != 0 if proc else any(l.startswith("Error:") for l in lines[-3:])
     if not failed:
         return {"ok": True, "attached": attached}
-    return {"error": (lines[-1] if lines else "update failed")[:160], "attached": attached}
+    msgs = [l for l in lines if not l.startswith("Downloading")] or ["update failed"]
+    return {"error": msgs[-1][:160], "attached": attached}
 
 
 def stop_game(app_id: str, *, force: bool = False) -> Any:
