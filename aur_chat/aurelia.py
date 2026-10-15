@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -134,28 +135,37 @@ _PROGRESS = re.compile(r"Downloading:\s+(\d+(?:\.\d+)?)% overall")
 
 
 def update_game_progress(app_id: str, on_progress) -> Any:
-    proc = subprocess.Popen(
-        [BIN, "update", str(app_id), "-v"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    tail, out = "", []
-    fd = proc.stdout.fileno()
-    while chunk := os.read(fd, 4096):
-        text = chunk.decode("utf-8", "replace")
-        out.append(text)
-        tail = (tail + text)[-400:]
-        matches = _PROGRESS.findall(tail)
-        if matches:
-            on_progress(float(matches[-1]))
-            tail = tail[-120:]
-    code = proc.wait()
-    if code == 0:
+    # Output goes to a log file, not a pipe, so the update survives aur-chat closing.
+    log = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "aur-chat"
+    log.mkdir(parents=True, exist_ok=True)
+    path = log / f"update-{app_id}.log"
+    with path.open("wb") as out:
+        proc = subprocess.Popen(
+            [BIN, "update", str(app_id), "-v"],
+            stdin=subprocess.DEVNULL,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    tail, pos = "", 0
+    with path.open("rb") as r:
+        while True:
+            text = r.read().decode("utf-8", "replace")
+            pos += len(text)
+            if text:
+                tail = (tail + text)[-400:]
+                matches = _PROGRESS.findall(tail)
+                if matches:
+                    on_progress(float(matches[-1]))
+                    tail = tail[-120:]
+            elif proc.poll() is not None:
+                break
+            else:
+                time.sleep(0.3)
+    if proc.returncode == 0:
         return {"ok": True}
-    lines = [l.strip() for l in "".join(out).splitlines() if l.strip()]
-    return {"error": (lines[-1] if lines else f"update exited {code}")[:160]}
+    lines = [l.strip() for l in path.read_text(errors="replace").splitlines() if l.strip()]
+    return {"error": (lines[-1] if lines else f"update exited {proc.returncode}")[:160]}
 
 
 def stop_game(app_id: str, *, force: bool = False) -> Any:
