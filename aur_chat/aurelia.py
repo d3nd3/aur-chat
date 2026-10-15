@@ -140,22 +140,30 @@ def _update_running(app_id: str) -> bool:
     return subprocess.run(["pgrep", "-f", f"aurelia update {app_id}( |$)"], stdout=subprocess.DEVNULL).returncode == 0
 
 
+# Runs the update detached and notifies on outcome, so you hear back even if aur-chat is closed.
+_UPDATE_SH = (
+    '"$1" update "$2" -v >>"$3" 2>&1; rc=$?; '
+    'if [ $rc -eq 0 ]; then m=finished; else m=stopped; fi; '
+    'notify-send --app-name=aur-chat aur-chat "Download $m: $2" 2>/dev/null; exit $rc'
+)
+
+
 def update_game_progress(app_id: str, on_progress) -> Any:
     # Output goes to a log file, not a pipe, so the update survives aur-chat closing.
     log = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "aur-chat"
     log.mkdir(parents=True, exist_ok=True)
     path = log / f"update-{app_id}.log"
+    path.touch(exist_ok=True)
     proc = None
-    # Attach to an update already running (e.g. started from the CLI) instead of failing.
-    if not _update_running(app_id):
-        with path.open("ab") as out:
-            proc = subprocess.Popen(
-                [BIN, "update", str(app_id), "-v"],
-                stdin=subprocess.DEVNULL,
-                stdout=out,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
+    attached = _update_running(app_id)  # attach to an update started elsewhere (e.g. CLI)
+    if not attached:
+        proc = subprocess.Popen(
+            ["sh", "-c", _UPDATE_SH, "sh", BIN, str(app_id), str(path)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     tail = ""
     with path.open("rb") as r:
         while True:
@@ -170,10 +178,11 @@ def update_game_progress(app_id: str, on_progress) -> Any:
                 break
             else:
                 time.sleep(0.3)
-    if proc is None or proc.returncode == 0:
-        return {"ok": True}
     lines = [l.strip() for l in path.read_text(errors="replace").splitlines() if l.strip()]
-    return {"error": (lines[-1] if lines else f"update exited {proc.returncode}")[:160]}
+    failed = proc.returncode != 0 if proc else any(l.startswith("Error:") for l in lines[-3:])
+    if not failed:
+        return {"ok": True, "attached": attached}
+    return {"error": (lines[-1] if lines else "update failed")[:160], "attached": attached}
 
 
 def stop_game(app_id: str, *, force: bool = False) -> Any:

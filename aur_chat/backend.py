@@ -809,8 +809,7 @@ class AureliaBackend(QObject):
             if g.get("isShortcut") or not g["installed"]:
                 state = ""
             elif app_id in self._updating:
-                pct = self._progress.get(app_id)
-                state = f"Updating… {pct:.0f}%" if pct is not None else "Updating…"
+                state = "Updating…"
             elif app_id in self._updates:
                 state = "Update available"
             else:
@@ -877,11 +876,13 @@ class AureliaBackend(QObject):
         if ok:
             self._updates.discard(app_id)
             self._set_status(f"{name} updated")
-            desktop_notify("aur-chat", f"Download finished: {name}")
+            if data.get("attached"):
+                desktop_notify("aur-chat", f"Download finished: {name}")
         else:
             err = data.get("error", "update failed") if isinstance(data, dict) else "update failed"
             self._set_status(str(err)[:160])
-            desktop_notify("aur-chat", f"Download stopped: {name}", urgency="critical")
+            if isinstance(data, dict) and data.get("attached"):
+                desktop_notify("aur-chat", f"Download stopped: {name}", urgency="critical")
         self._apply_update_states()
         self.gamesListChanged.emit()
         self.refreshUpdates()
