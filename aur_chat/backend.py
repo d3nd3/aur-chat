@@ -378,8 +378,7 @@ class AureliaBackend(QObject):
         self._stop_force = False
         self._local_game = ""
         self._local_game_process: Any = None
-        self._local_log: Any = None
-        self._local_started = 0.0
+        self._handoff: Any = None
         self._active_id = ""
         self._active_name = ""
         self._search_result: dict | None = None
@@ -632,19 +631,26 @@ class AureliaBackend(QObject):
         game = str(profile.get("game_name") or "").strip()
         if not game and profile.get("game_app_id"):
             game = f"app {profile['game_app_id']}"
+        if self._steam_game and not game:
+            desktop_notify("aur-chat", f"{self._steam_game} closed")
         self._steam_game = game
         self._steam_app_id = str(profile.get("game_app_id") or "")
         self._render_presence()
 
-    def _track_local_game(self, name: str, process: Any, app_id: str = "", log: Any = None):
+    def _track_local_game(self, name: str, process: Any, app_id: str = ""):
         self._local_game = name
         self._local_app_id = app_id
         self._local_game_process = process
-        self._local_log = log
-        self._local_started = time.monotonic()
         self._render_presence()
 
     def _poll_local_game(self):
+        if self._handoff and self._handoff[1].poll() is not None:
+            name, proc, log = self._handoff
+            self._handoff = None
+            if proc.returncode:  # Steam refused the launch request
+                why = aurelia.last_error(log)
+                self._set_games_status(f"Couldn't launch {name}: {why}")
+                desktop_notify("aur-chat", f"Launch failed: {name}", urgency="critical")
         process = self._local_game_process
         if not process:
             return
@@ -653,11 +659,7 @@ class AureliaBackend(QObject):
         except (OSError, AttributeError):
             finished = True
         if finished:
-            if self._local_game and self._local_log and (process.returncode or time.monotonic() - self._local_started < 20):
-                why = aurelia.last_error(self._local_log)  # exited straight away: the launch failed
-                self._set_games_status(f"Couldn't launch {self._local_game}: {why}")
-                desktop_notify("aur-chat", f"Launch failed: {self._local_game}", urgency="critical")
-            elif self._local_game:
+            if self._local_game:
                 desktop_notify("aur-chat", f"{self._local_game} closed")
             self._local_game_process = None
             self._local_game = ""
@@ -681,7 +683,10 @@ class AureliaBackend(QObject):
         if not app_id:
             self._on_game_stopped(name, {"error": "unknown app id"})
             return
-        self._stop_worker = _Fetch(aurelia.stop_game, app_id, force=self._stop_force)
+        if not self._local_game:  # launched through Steam, so ask Steam to close it
+            self._stop_worker = _Fetch(aurelia.close_steam_game, app_id)
+        else:
+            self._stop_worker = _Fetch(aurelia.stop_game, app_id, force=self._stop_force)
         self._stop_worker.done.connect(lambda d, n=name: self._on_game_stopped(n, d))
         self._set_status(f"Ending {name}…")
         self._stop_worker.start()
@@ -969,9 +974,8 @@ class AureliaBackend(QObject):
             return
         try:
             name = row["name"] if row else app_id
-            process = aurelia.play_game(app_id)
-            self._track_local_game(name, process, app_id, aurelia.play_log(app_id))
-            self._set_games_status(f"Launching {name}…")
+            self._handoff = (name, aurelia.launch_steam(app_id), aurelia.play_log(app_id))
+            self._set_games_status(f"Launching {name} via Steam…")
             desktop_notify("aur-chat", f"Launching {name}")
         except OSError as e:
             self._set_games_status(str(e))

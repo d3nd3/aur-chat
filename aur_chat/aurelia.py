@@ -119,15 +119,21 @@ def play_log(app_id: str) -> Path:
     return d / f"play-{app_id}.log"
 
 
-def play_game(app_id: str) -> subprocess.Popen:
+def launch_steam(app_id: str) -> subprocess.Popen:
+    # Same as the Steam client's Play button: Steam starts the game (and its runtime) itself.
     with play_log(app_id).open("wb") as out:
         return subprocess.Popen(
-            [BIN, "play", str(app_id), "--steam", "-v"],
+            ["steam", "-applaunch", str(app_id)],
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=out,
             stderr=subprocess.STDOUT,
         )
+
+
+def close_steam_game(app_id: str) -> Any:
+    subprocess.run(["steam", f"steam://close/{app_id}"], stdin=subprocess.DEVNULL, timeout=20, check=False)
+    return {"ok": True}
 
 
 def last_error(path: Path) -> str:
