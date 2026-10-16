@@ -113,14 +113,27 @@ def list_games(*, search: str = "", installed_only: bool = False) -> Any:
     return run_json(argv, timeout=300)
 
 
+def play_log(app_id: str) -> Path:
+    d = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "aur-chat"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"play-{app_id}.log"
+
+
 def play_game(app_id: str) -> subprocess.Popen:
-    return subprocess.Popen(
-        [BIN, "play", str(app_id), "--steam"],
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    with play_log(app_id).open("wb") as out:
+        return subprocess.Popen(
+            [BIN, "play", str(app_id), "--steam", "-v"],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+        )
+
+
+def last_error(path: Path) -> str:
+    lines = [l.strip() for l in path.read_text(errors="replace").splitlines() if l.strip()]
+    hits = [l for l in lines if "rror" in l or "fail" in l.lower()]
+    return (hits or lines or ["launch failed"])[-1][:160]
 
 
 def updates() -> Any:

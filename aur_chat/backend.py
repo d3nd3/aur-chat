@@ -378,6 +378,8 @@ class AureliaBackend(QObject):
         self._stop_force = False
         self._local_game = ""
         self._local_game_process: Any = None
+        self._local_log: Any = None
+        self._local_started = 0.0
         self._active_id = ""
         self._active_name = ""
         self._search_result: dict | None = None
@@ -634,10 +636,12 @@ class AureliaBackend(QObject):
         self._steam_app_id = str(profile.get("game_app_id") or "")
         self._render_presence()
 
-    def _track_local_game(self, name: str, process: Any, app_id: str = ""):
+    def _track_local_game(self, name: str, process: Any, app_id: str = "", log: Any = None):
         self._local_game = name
         self._local_app_id = app_id
         self._local_game_process = process
+        self._local_log = log
+        self._local_started = time.monotonic()
         self._render_presence()
 
     def _poll_local_game(self):
@@ -649,7 +653,11 @@ class AureliaBackend(QObject):
         except (OSError, AttributeError):
             finished = True
         if finished:
-            if self._local_game:
+            if self._local_game and self._local_log and (process.returncode or time.monotonic() - self._local_started < 20):
+                why = aurelia.last_error(self._local_log)  # exited straight away: the launch failed
+                self._set_games_status(f"Couldn't launch {self._local_game}: {why}")
+                desktop_notify("aur-chat", f"Launch failed: {self._local_game}", urgency="critical")
+            elif self._local_game:
                 desktop_notify("aur-chat", f"{self._local_game} closed")
             self._local_game_process = None
             self._local_game = ""
@@ -962,7 +970,7 @@ class AureliaBackend(QObject):
         try:
             name = row["name"] if row else app_id
             process = aurelia.play_game(app_id)
-            self._track_local_game(name, process, app_id)
+            self._track_local_game(name, process, app_id, aurelia.play_log(app_id))
             self._set_games_status(f"Launching {name}…")
             desktop_notify("aur-chat", f"Launching {name}")
         except OSError as e:
