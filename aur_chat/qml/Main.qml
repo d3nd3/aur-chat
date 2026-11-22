@@ -10,8 +10,20 @@ Kirigami.ApplicationWindow {
     height: 600
 
     property bool addFriendOpen: false
+    property bool renameOpen: false
+    property bool settingsOpen: false
+    readonly property int fontDefault: Kirigami.Theme.defaultFont.pixelSize
+    function syncFontSpin() {
+        fontSpin.value = backend.friendFontSize > 0 ? backend.friendFontSize : root.fontDefault
+        chatSpin.value = backend.chatFontSize > 0 ? backend.chatFontSize : root.fontDefault
+    }
+    Connections {
+        target: backend
+        function onFriendFontChanged() { if (root.settingsOpen) root.syncFontSpin() }
+        function onChatFontChanged() { if (root.settingsOpen) root.syncFontSpin() }
+    }
 
-    onVisibilityChanged: function(vis) { backend.setWindowVisible(vis !== Qt.WindowHidden) }
+    onVisibilityChanged: function(vis) { backend.setWindowVisible(vis !== Qt.WindowHidden && vis !== Qt.WindowMinimized) }
 
     onClosing: function(close) {
         if (trayOk) {
@@ -24,17 +36,15 @@ Kirigami.ApplicationWindow {
 
     Connections {
         target: backend
-        function onAuthRequiredChanged() { authBanner.visible = backend.authRequired }
         function onPresenceModeChanged() {
             const i = backend.presenceModes.indexOf(backend.presenceMode)
             if (i >= 0 && presenceBox.currentIndex !== i)
                 presenceBox.currentIndex = i
         }
     }
-    Component.onCompleted: authBanner.visible = backend.authRequired
 
     pageStack.initialPage: Kirigami.Page {
-        title: backend.activeFriendName || "aur-chat"
+        title: backend.playingTitle
         actions: [
             Kirigami.Action {
                 text: "Refresh"
@@ -52,6 +62,12 @@ Kirigami.ApplicationWindow {
                 icon.name: "list-add-user"
                 visible: mainTabs.currentIndex === 0
                 onTriggered: root.addFriendOpen = true
+            },
+            Kirigami.Action {
+                text: backend.dualWindow ? "Restore to one window" : "Dual window"
+                icon.name: "window-duplicate"
+                visible: mainTabs.currentIndex === 0
+                onTriggered: backend.setDualWindow(!backend.dualWindow)
             }
         ]
 
@@ -82,6 +98,14 @@ Kirigami.ApplicationWindow {
                     onClicked: { checked = true; chatTab.checked = false; mainTabs.goGames() }
                 }
                 Item { Layout.fillWidth: true }
+                QQC2.ToolButton {
+                    id: ownNameBtn
+                    text: backend.ownName || "…"
+                    font.bold: true
+                    onClicked: { renameField.text = backend.ownName; root.renameOpen = true }
+                    QQC2.ToolTip.visible: hovered
+                    QQC2.ToolTip.text: "Change your profile name"
+                }
                 Text {
                     text: backend.presenceText
                     color: Kirigami.Theme.textColor
@@ -92,8 +116,14 @@ Kirigami.ApplicationWindow {
                 QQC2.Button {
                     visible: backend.gameRunning
                     enabled: !backend.busy
-                    text: backend.stopForce ? "Force end" : "End game"
-                    onClicked: backend.endGame()
+                    text: "End game"
+                    onClicked: backend.endGame(false)
+                }
+                QQC2.Button {
+                    visible: backend.gameRunning
+                    enabled: !backend.busy
+                    text: "Force end"
+                    onClicked: backend.endGame(true)
                 }
                 QQC2.ComboBox {
                     id: presenceBox
@@ -105,6 +135,13 @@ Kirigami.ApplicationWindow {
                     QQC2.ToolTip.visible: hovered
                     QQC2.ToolTip.text: "Set Steam status"
                 }
+                QQC2.ToolButton {
+                    objectName: "settingsBtn"
+                    icon.name: "settings-configure"
+                    onClicked: settingsDialog.open()
+                    QQC2.ToolTip.visible: hovered
+                    QQC2.ToolTip.text: "Settings"
+                }
             }
 
             StackLayout {
@@ -112,12 +149,32 @@ Kirigami.ApplicationWindow {
                 Layout.fillHeight: true
                 currentIndex: mainTabs.currentIndex
 
-                RowLayout {
-                    spacing: 0
+                QQC2.SplitView {
+                    id: chatSplit
+                    orientation: Qt.Horizontal
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    handle: Rectangle {
+                        implicitWidth: 4
+                        property bool dragging: QQC2.SplitHandle.pressed
+                        onDraggingChanged: if (!dragging) splitSave.restart()  // save once per drag
+                        color: dragging ? Kirigami.Theme.highlightColor
+                            : QQC2.SplitHandle.hovered ? Kirigami.Theme.hoverColor
+                            : Kirigami.Theme.disabledTextColor
+                        HoverHandler { cursorShape: Qt.SplitHCursor }
+                    }
+                    Timer {
+                        id: splitSave
+                        interval: 400
+                        onTriggered: backend.setFriendsWidth(friendsCol.width)
+                    }
 
             ColumnLayout {
-                Layout.preferredWidth: Math.min(300, root.width * 0.34)
-                Layout.minimumWidth: 220
+                id: friendsCol
+                QQC2.SplitView.preferredWidth: backend.friendsWidth > 0
+                    ? backend.friendsWidth : Math.min(300, root.width * 0.34)
+                QQC2.SplitView.minimumWidth: 220
+                onWidthChanged: if (chatSplit.dragging) splitSave.restart()
                 Layout.fillHeight: true
                 spacing: Kirigami.Units.smallSpacing
 
@@ -143,6 +200,12 @@ Kirigami.ApplicationWindow {
                     placeholderText: "Filter friends…"
                     onTextChanged: backend.setFriendFilter(text)
                 }
+                QQC2.CheckBox {
+                    Layout.leftMargin: Kirigami.Units.gridUnit
+                    text: "Hide offline"
+                    checked: backend.hideOffline
+                    onToggled: backend.setHideOffline(checked)
+                }
 
                 ListView {
                     id: friendList
@@ -153,9 +216,13 @@ Kirigami.ApplicationWindow {
                     currentIndex: -1
                     delegate: QQC2.ItemDelegate {
                         id: row
+                        readonly property int baseSize: backend.friendFontSize > 0
+                            ? backend.friendFontSize : Kirigami.Theme.defaultFont.pixelSize
                         width: friendList.width
                         highlighted: modelData.steamId === backend.activeFriendId
                         onPressed: backend.pickFriend(modelData.steamId)  // press, not click: list may reorder mid-click
+                        QQC2.ToolTip.visible: hovered && (modelData.lastSeen.length > 0 || modelData.richText.length > 0)
+                        QQC2.ToolTip.text: [modelData.lastSeen, modelData.richText].filter(Boolean).join("\n")
                         background: Rectangle {
                             color: modelData.unread > 0
                                 ? Qt.alpha(Kirigami.Theme.highlightColor, 0.25) : "transparent"
@@ -167,7 +234,8 @@ Kirigami.ApplicationWindow {
                                 spacing: Kirigami.Units.smallSpacing
                                 Rectangle {
                                     Layout.alignment: Qt.AlignVCenter
-                                    width: Kirigami.Units.smallSpacing
+                                    Layout.rightMargin: Kirigami.Units.smallSpacing
+                                    width: Kirigami.Units.gridUnit * 0.5
                                     height: width
                                     radius: width / 2
                                     color: modelData.statusColor
@@ -175,9 +243,17 @@ Kirigami.ApplicationWindow {
                                 Text {
                                     text: modelData.name
                                     font.bold: row.highlighted || modelData.unread > 0
+                                    font.pixelSize: row.baseSize
                                     color: Kirigami.Theme.textColor
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: "★"
+                                    visible: modelData.favourite
+                                    color: "#f5c211"
+                                    font.pixelSize: row.baseSize
+                                    Layout.alignment: Qt.AlignVCenter
                                 }
                                 Rectangle {
                                     visible: modelData.unread > 0
@@ -198,197 +274,83 @@ Kirigami.ApplicationWindow {
                                     id: deviceBadge
                                     visible: (modelData.device || "").length > 0
                                     Layout.alignment: Qt.AlignVCenter
-                                    implicitWidth: deviceText.implicitWidth +
+                                    implicitWidth: deviceRow.implicitWidth +
                                         Kirigami.Units.smallSpacing * 2
-                                    implicitHeight: deviceText.implicitHeight + 2
+                                    implicitHeight: Math.max(deviceIcon.height,
+                                        deviceText.implicitHeight) + 4
                                     radius: height / 2
                                     color: Kirigami.Theme.alternateBackgroundColor
-                                    Text {
-                                        id: deviceText
+                                    RowLayout {
+                                        id: deviceRow
                                         anchors.centerIn: parent
-                                        text: (modelData.deviceIcon || "") + " " +
-                                            (modelData.device || "")
-                                        color: Kirigami.Theme.disabledTextColor
-                                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                                        spacing: 3
+                                        Kirigami.Icon {
+                                            id: deviceIcon
+                                            source: modelData.deviceIcon
+                                            implicitWidth: 14
+                                            implicitHeight: 14
+                                            visible: source.length > 0
+                                        }
+                                        Text {
+                                            id: deviceText
+                                            text: modelData.device
+                                            color: Kirigami.Theme.disabledTextColor
+                                            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                                        }
                                     }
                                 }
                             }
                             Text {
-                                text: modelData.game ? modelData.status + " · " + modelData.game : modelData.status
-                                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                                // status · game · game context (Dota hero + level, joinable hint)
+                                text: {
+                                    const parts = [modelData.status]
+                                    if (modelData.game) parts.push(modelData.game)
+                                    if (modelData.gameDetail) parts.push(modelData.gameDetail)
+                                    return parts.join(" · ")
+                                }
+                                font.pixelSize: Math.max(9, Math.round(row.baseSize * 0.85))
                                 color: Kirigami.Theme.disabledTextColor
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
                         }
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: {
+                                friendMenu.steamId = modelData.steamId
+                                friendMenu.favourite = modelData.favourite
+                                friendMenu.popup(row, point.position.x, point.position.y)
+                            }
+                        }
                     }
                 }
             }
 
-            Rectangle {
-                Layout.preferredWidth: 1
-                Layout.fillHeight: true
-                color: Kirigami.Theme.disabledTextColor
+            QQC2.Menu {
+                id: friendMenu
+                property string steamId: ""
+                property bool favourite: false
+                QQC2.MenuItem {
+                    text: "Open chat"
+                    onTriggered: backend.pickFriend(friendMenu.steamId)
+                }
+                QQC2.MenuItem {
+                    text: friendMenu.favourite ? "Remove from favourites" : "Add to favourites"
+                    onTriggered: backend.toggleFavourite(friendMenu.steamId)
+                }
             }
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                spacing: 0
+            ChatPane {
+                QQC2.SplitView.fillWidth: true
+                QQC2.SplitView.minimumWidth: 260
+                visible: !backend.dualWindow
+            }
 
-                Kirigami.InlineMessage {
-                    id: authBanner
-                    Layout.fillWidth: true
-                    type: Kirigami.MessageType.Error
-                    text: "Not logged in — run `aurelia login` (or `aurelia login --qr`), then F5."
-                    visible: false
-                }
-
-                Kirigami.Heading {
-                    level: 2
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Kirigami.Units.gridUnit
-                    Layout.topMargin: Kirigami.Units.smallSpacing
-                    text: backend.activeFriendName || "Select a friend"
-                    opacity: backend.activeFriendId ? 1 : 0.6
-                }
-
-                ListView {
-                    id: chatView
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    spacing: Kirigami.Units.smallSpacing
-                    boundsBehavior: Flickable.StopAtBounds
-                    model: backend.messageItems
-                    property bool pinned: true  // follow new messages only while at the bottom
-                    onMovingChanged: if (!moving) pinned = atYEnd
-                    function scrollToLatest() {
-                        Qt.callLater(function() {
-                            if (chatView.count > 0 && chatView.pinned)
-                                chatView.positionViewAtEnd()
-                        })
-                    }
-                    onCountChanged: {
-                        if (count === 0) pinned = true
-                        scrollToLatest()
-                    }
-                    onContentHeightChanged: if (count > 0) scrollToLatest()
-                    delegate: Item {
-                        id: row
-                        width: chatView.width
-                        height: bubble.y + bubble.height + Kirigami.Units.smallSpacing
-                        readonly property bool fromSelf: modelData.fromSelf
-                        readonly property string msg: modelData.text
-                        readonly property string time: modelData.timestamp || ""
-                        readonly property string imageUrl: modelData.imageUrl || ""
-                        readonly property real pad: Kirigami.Units.smallSpacing
-                        readonly property real maxW: chatView.width * 0.78
-                        readonly property real maxImageW: Math.max(1, Math.min(
-                            row.maxW, chatView.width - Kirigami.Units.gridUnit * 2
-                        ))
-                        readonly property bool hasImage: row.imageUrl !== "" &&
-                            media.status === Image.Ready && media.implicitWidth > 0
-                        readonly property real imageW: row.hasImage
-                            ? Math.min(media.implicitWidth, row.maxImageW) : 0
-                        readonly property real imageH: row.hasImage
-                            ? media.implicitHeight * row.imageW / media.implicitWidth : 0
-
-                        Rectangle {
-                            id: bubble
-                            y: pad
-                            anchors.right: row.fromSelf ? parent.right : undefined
-                            anchors.left: row.fromSelf ? undefined : parent.left
-                            anchors.rightMargin: Kirigami.Units.gridUnit
-                            anchors.leftMargin: Kirigami.Units.gridUnit
-                            width: row.hasImage
-                                ? row.imageW + row.pad * 2
-                                : Math.min(row.maxW, chatView.width - Kirigami.Units.gridUnit * 2)
-                            height: (media.visible ? row.imageH : body.paintedHeight) +
-                                (stamp.visible ? stamp.paintedHeight + row.pad * 0.25 : 0) +
-                                row.pad * 2
-                            radius: Kirigami.Units.gridUnit * 0.5
-                            color: row.fromSelf ? Kirigami.Theme.highlightColor : Kirigami.Theme.alternateBackgroundColor
-                            Image {
-                                id: media
-                                x: row.pad
-                                y: row.pad
-                                width: row.imageW
-                                height: row.imageH
-                                source: row.imageUrl
-                                fillMode: Image.PreserveAspectFit
-                                asynchronous: true
-                                cache: true
-                                visible: row.hasImage
-                                MouseArea {
-                                    anchors.fill: parent
-                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                    onClicked: function(mouse) {
-                                        if (mouse.button === Qt.RightButton) {
-                                            imageMenu.imageUrl = row.imageUrl
-                                            imageMenu.popup(media, mouse.x, mouse.y)
-                                        } else {
-                                            imagePopup.imageUrl = row.imageUrl
-                                            imagePopup.open()
-                                        }
-                                    }
-                                }
-                            }
-                            TextEdit {
-                                id: body
-                                x: row.pad
-                                y: row.pad
-                                width: parent.width - row.pad * 2
-                                text: row.msg
-                                visible: !media.visible
-                                readOnly: true
-                                selectByMouse: true
-                                wrapMode: TextEdit.Wrap
-                                color: row.fromSelf ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
-                            }
-                            Text {
-                                id: stamp
-                                x: row.pad
-                                y: (media.visible ? media.y + media.height : body.y + body.paintedHeight) +
-                                    row.pad * 0.25
-                                width: parent.width - row.pad * 2
-                                text: row.time
-                                visible: text.length > 0
-                                horizontalAlignment: Text.AlignRight
-                                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                                color: row.fromSelf ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
-                                opacity: 0.7
-                            }
-                        }
-                    }
-                }
-
-                Connections {
-                    target: backend
-                    function onMessagesChanged() { chatView.scrollToLatest() }
-                }
-
-                Kirigami.FormLayout {
-                    Layout.fillWidth: true
-                    Layout.margins: Kirigami.Units.gridUnit
-                    QQC2.TextField {
-                        Kirigami.FormData.label: "Message"
-                        Layout.fillWidth: true
-                        placeholderText: backend.activeFriendId ? "Message…" : "Pick a friend first"
-                        enabled: !!backend.activeFriendId
-                        Keys.onPressed: function(event) {
-                            if (event.key === Qt.Key_V &&
-                                (event.modifiers & Qt.ControlModifier) &&
-                                backend.pasteImage()) {
-                                event.accepted = true
-                            }
-                        }
-                        onAccepted: {
-                            backend.sendMessage(text)
-                            text = ""
-                        }
-                    }
-                }
+            Kirigami.PlaceholderMessage {
+                QQC2.SplitView.fillWidth: true
+                visible: backend.dualWindow
+                icon.name: "window-duplicate"
+                text: "Chats are open in the chat window"
             }
                 }
 
@@ -533,55 +495,6 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    QQC2.Popup {
-        id: imagePopup
-        parent: QQC2.Overlay.overlay
-        anchors.centerIn: parent
-        modal: true
-        focus: true
-        padding: Kirigami.Units.smallSpacing
-        property string imageUrl: ""
-        width: Math.max(240, Math.min(root.width * 0.92,
-            fullImage.implicitWidth + padding * 2))
-        height: Math.max(160, Math.min(root.height * 0.92,
-            fullImage.implicitHeight + padding * 2))
-        closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutside
-        background: Rectangle {
-            color: Kirigami.Theme.backgroundColor
-            radius: Kirigami.Units.smallSpacing
-            border.color: Kirigami.Theme.disabledTextColor
-        }
-        contentItem: Flickable {
-            id: imageViewport
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
-            contentWidth: Math.max(width, fullImage.width)
-            contentHeight: Math.max(height, fullImage.height)
-            Image {
-                id: fullImage
-                source: imagePopup.imageUrl
-                width: implicitWidth
-                height: implicitHeight
-                x: Math.max(0, (imageViewport.contentWidth - width) / 2)
-                y: Math.max(0, (imageViewport.contentHeight - height) / 2)
-                asynchronous: true
-                cache: true
-            }
-        }
-    }
-
-    QQC2.Menu {
-        id: imageMenu
-        property string imageUrl: ""
-        QQC2.MenuItem {
-            text: "Copy image URL"
-            onTriggered: backend.copyImageUrl(imageMenu.imageUrl)
-        }
-        QQC2.MenuItem {
-            text: "Copy image"
-            onTriggered: backend.copyImage(imageMenu.imageUrl)
-        }
-    }
 
     KDialog.Dialog {
         visible: backend.launchOptionsOpen
@@ -660,4 +573,113 @@ Kirigami.ApplicationWindow {
             }
         }
     }
+
+    KDialog.Dialog {
+        visible: root.renameOpen
+        title: "Profile name"
+        standardButtons: KDialog.Dialog.NoButton
+        preferredWidth: Kirigami.Units.gridUnit * 24
+        ColumnLayout {
+            QQC2.TextField {
+                id: renameField
+                Layout.fillWidth: true
+                placeholderText: "New profile name"
+                onAccepted: renameSave.clicked()
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                QQC2.Button { text: "Cancel"; onClicked: root.renameOpen = false }
+                Item { Layout.fillWidth: true }
+                QQC2.Button {
+                    id: renameSave
+                    text: "Save"
+                    enabled: renameField.text.trim().length > 0 && !backend.busy
+                    onClicked: { backend.setOwnName(renameField.text); root.renameOpen = false }
+                }
+            }
+        }
+    }
+
+    KDialog.Dialog {
+        id: settingsDialog
+        // imperative open/close: dialog-driven dismissal (Esc, click-outside) would
+        // kill a `visible: root.settingsOpen` binding and the dialog could never reopen
+        title: "Settings"
+        onVisibleChanged: {
+            root.settingsOpen = visible  // mirror for the font-change handlers
+            if (visible) root.syncFontSpin()
+        }
+        standardButtons: KDialog.Dialog.NoButton
+        preferredWidth: Kirigami.Units.gridUnit * 22
+        ColumnLayout {
+            Kirigami.FormLayout {
+                QQC2.SpinBox {
+                    id: fontSpin
+                    Kirigami.FormData.label: "Friends list font (px)"
+                    from: 8
+                    to: 24
+                    editable: false
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 7
+                    onValueModified: backend.setFriendFontSize(value)
+                }
+                QQC2.SpinBox {
+                    id: chatSpin
+                    Kirigami.FormData.label: "Chat font (px)"
+                    from: 8
+                    to: 24
+                    editable: false
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 7
+                    onValueModified: backend.setChatFontSize(value)
+                }
+                QQC2.SpinBox {
+                    id: pollSpin
+                    Kirigami.FormData.label: "Friends refresh (s)"
+                    from: 2
+                    to: 120
+                    editable: false
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 7
+                    value: backend.friendsInterval
+                    onValueModified: backend.setFriendsInterval(value)
+                }
+                QQC2.SpinBox {
+                    id: gamePollSpin
+                    Kirigami.FormData.label: "Game status poll (s)"
+                    from: 1
+                    to: 60
+                    editable: false
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 7
+                    value: backend.gamesInterval
+                    onValueModified: backend.setGamesInterval(value)
+                }
+                QQC2.ComboBox {
+                    id: animCombo
+                    Kirigami.FormData.label: "Animation speed"
+                    editable: false
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 7
+                    model: ["Normal", "Half", "Quarter", "Off"]
+                    currentIndex: backend.animIndex
+                    onActivated: backend.setAnimSpeed(currentIndex)
+                }
+            }
+            Text {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
+                text: "Background refreshes are silent — the friends list updates in place every %1s, the running-game check every %2s. Chat messages arrive instantly via the daemon stream; no polling involved."
+                    .arg(backend.friendsInterval).arg(backend.gamesInterval)
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                QQC2.Button {
+                    text: "Reset to default"
+                    onClicked: { backend.setFriendFontSize(0); backend.setChatFontSize(0) }
+                }
+                Item { Layout.fillWidth: true }
+                QQC2.Button { text: "Close"; onClicked: settingsDialog.close() }
+            }
+        }
+    }
+
+    ChatWindow {}
 }

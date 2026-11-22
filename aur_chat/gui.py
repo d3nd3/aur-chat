@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from PyQt6.QtCore import QLockFile, QRectF, QSize, Qt, QUrl, pyqtSlot
-from PyQt6.QtGui import QAction, QBrush, QColor, QFont, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QAction, QBrush, QColor, QFont, QIcon, QPainter
 from PyQt6.QtQml import QQmlApplicationEngine
 from PyQt6.QtQuick import QQuickWindow
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -85,6 +85,7 @@ class _TrayHost(QApplication):
         self._backend.presenceChanged.connect(self._update_presence)
         self._backend.unreadChanged.connect(self._update_unread)
         self._backend.updatingChanged.connect(self._update_unread)
+        self._backend.messageArrived.connect(self._alert_minimized)
         self._update_presence()
         self._update_unread()
         self._update_tray_games()
@@ -99,6 +100,10 @@ class _TrayHost(QApplication):
 
     def set_root(self, root):
         self._root = root
+
+    def _alert_minimized(self):  # flash the taskbar entry; the tray badge covers the rest
+        if self._root and self._root.windowState() & Qt.WindowState.WindowMinimized:
+            self._root.alert(0)
 
     def _update_presence(self):
         text = self._backend.presenceText

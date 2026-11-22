@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -23,7 +24,7 @@ def _find_binary() -> str:
                 return str(path)
     if path := shutil.which("aurelia"):
         return path
-    root = Path(__file__).resolve().parents[4] / "Aurelia"
+    root = Path(__file__).resolve().parents[1] / "Aurelia"
     for path in (root / "target/release/aurelia", root / "target/debug/aurelia"):
         if path.is_file() and os.access(path, os.X_OK):
             return str(path)
@@ -84,6 +85,10 @@ def set_presence(mode: str) -> Any:
     return run_json(["config", "presence", mode])
 
 
+def set_persona_name(name: str) -> Any:
+    return run_json(["persona", name])
+
+
 def user_profile(steam_id: str) -> Any:
     return run_json(["user", str(steam_id)])
 
@@ -100,8 +105,16 @@ def chat_history(steam_id: str, count: int = 40) -> Any:
     return run_json(["chat", "history", steam_id, "--count", str(count)])
 
 
+def chat_send(steam_id: str, message: str) -> Any:
+    return run_json(["chat", "send", steam_id, message])
+
+
 def chat_send_image(steam_id: str, path: str) -> Any:
     return run_json(["chat", "send-image", steam_id, path], timeout=300)
+
+
+def chat_stickers() -> Any:
+    return run_json(["chat", "stickers"])
 
 
 def list_games(*, search: str = "", installed_only: bool = False) -> Any:
@@ -119,11 +132,10 @@ def play_log(app_id: str) -> Path:
     return d / f"play-{app_id}.log"
 
 
-def launch_steam(app_id: str) -> subprocess.Popen:
-    # Same as the Steam client's Play button: Steam starts the game (and its runtime) itself.
+def _spawn(app_id: str, argv: list[str]) -> subprocess.Popen:
     with play_log(app_id).open("wb") as out:
         return subprocess.Popen(
-            ["steam", "-applaunch", str(app_id)],
+            argv,
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=out,
@@ -131,9 +143,39 @@ def launch_steam(app_id: str) -> subprocess.Popen:
         )
 
 
+def launch_steam(app_id: str) -> subprocess.Popen:
+    # Same as the Steam client's Play button: Steam starts the game (and its runtime) itself.
+    return _spawn(app_id, ["steam", "-applaunch", str(app_id)])
+
+
+def launch_standalone(app_id: str, launch_options: str) -> subprocess.Popen:
+    # Runs without Steam; `aurelia play` wraps the game in its launch script, which reads the options from this file (Aurelia drops custom env vars).
+    (play_log(app_id).parent / f"launch-options-{app_id}.txt").write_text(launch_options)
+    return _spawn(app_id, [BIN, "play", str(app_id)])
+
+
+def has_launch_script(app_id: str) -> bool:
+    scripts = run_json(["scripts", "list"], timeout=30).get("scripts", [])
+    return any(str(s.get("app_id")) == str(app_id) for s in scripts)
+
+
 def close_steam_game(app_id: str) -> Any:
     subprocess.run(["steam", f"steam://close/{app_id}"], stdin=subprocess.DEVNULL, timeout=20, check=False)
     return {"ok": True}
+
+
+def kill_steam_game(app_id: str) -> Any:
+    # Steam sets SteamAppId=<id> in each game's environment, which identifies its processes.
+    needle = f"SteamAppId={app_id}".encode()
+    killed = 0
+    for environ in Path("/proc").glob("[0-9]*/environ"):
+        try:
+            if needle in environ.read_bytes().split(b"\0"):
+                os.kill(int(environ.parent.name), signal.SIGKILL)
+                killed += 1
+        except OSError:
+            continue
+    return {"ok": True} if killed else {"error": f"no running process for app {app_id}"}
 
 
 def last_error(path: Path) -> str:

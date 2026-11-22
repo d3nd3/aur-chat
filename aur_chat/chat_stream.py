@@ -7,25 +7,24 @@ from PyQt6.QtCore import QProcess, pyqtSignal
 from . import aurelia
 
 
-class ChatStream(QProcess):
+class EventStream(QProcess):
+    """One long-lived `aurelia chat events --json` process: every incoming chat
+    event on the shared daemon session arrives here, tagged with its source
+    SteamID — replaces the old per-friend `chat open` watcher sessions."""
+
     chatEvent = pyqtSignal(dict)
 
-    def __init__(self, steam_id: str):
+    def __init__(self):
         super().__init__()
-        self.steam_id = steam_id
         self._buf = ""
 
-    def start_session(self):
+    def start_stream(self):
         self._buf = ""
         self.setProgram(aurelia.BIN)
-        self.setArguments(["chat", "open", self.steam_id, "--json"])
+        self.setArguments(["chat", "events", "--json"])
         self.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         self.readyReadStandardOutput.connect(self._on_out)
         self.start()
-
-    def send_line(self, text: str):
-        if self.state() == QProcess.ProcessState.Running:
-            self.write((text + "\n").encode())
 
     def _on_out(self):
         self._buf += self.readAllStandardOutput().data().decode(errors="replace")

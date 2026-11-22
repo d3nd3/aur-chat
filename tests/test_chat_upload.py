@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from aur_chat import aurelia
-from aur_chat.chat_stream import ChatStream
+from aur_chat.chat_stream import EventStream
 from aur_chat.backend import (
     _clipboard_image_path,
     _device_info,
@@ -63,7 +63,7 @@ class ChatUploadTests(unittest.TestCase):
                     first.unlock()
 
     def test_chat_stream_keeps_qobject_event_method(self):
-        stream = ChatStream("0")
+        stream = EventStream()
         self.assertTrue(callable(stream.event))
         stream.kill()
 
@@ -94,11 +94,11 @@ class ChatUploadTests(unittest.TestCase):
     def test_friend_device_info_uses_steam_persona_flags(self):
         self.assertEqual(
             _device_info({"persona_state": 1, "persona_state_flags": 512}),
-            ("Mobile", "📱"),
+            ("Mobile", "smartphone"),
         )
         self.assertEqual(
             _device_info({"persona_state": 1, "persona_state_flags": 0}),
-            ("PC", "🖥"),
+            ("PC", "computer"),
         )
         self.assertEqual(_device_info({"persona_state": 0, "persona_state_flags": 512}), ("", ""))
 

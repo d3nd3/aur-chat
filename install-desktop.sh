@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 DEST="${AUR_CHAT_ROOT:-$HOME/.local/share/aur-chat}"
 BIN="${INSTALL_BIN:-$HOME/.local/bin/aur-chat}"
-AURELIA_ROOT="${AURELIA_ROOT:-$ROOT/../../../Aurelia}"
+AURELIA_ROOT="${AURELIA_ROOT:-$ROOT/../Aurelia}"
 mkdir -p "$DEST" "$HOME/.local/bin" "$HOME/.local/share/applications" \
   "$HOME/.local/share/icons/hicolor/scalable/apps"
 rm -rf "$DEST/aur_chat"
