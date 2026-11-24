@@ -2,6 +2,8 @@
 
 Lightweight Steam chat UI for Aurelia.
 
+Prefer pictures? Start with **[HUMANS.md](HUMANS.md)**.
+
 ## Build
 
 One step — `make` in the Aurelia checkout builds it and runs this repo's

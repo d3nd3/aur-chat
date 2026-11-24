@@ -1,0 +1,52 @@
+# aur-chat — Steam chat front end for the Aurelia daemon
+# Strokes only (no fills) so light/dark themes both stay readable.
+direction: right
+
+classes: {
+  entry: {style: {stroke: "#4f9cf9"; stroke-width: 2}}
+  core: {style: {stroke: "#9a7cf9"}}
+  state: {style: {stroke: "#e0a44a"}}
+  ext: {style: {stroke: "#6ac48a"; stroke-dash: 4}}
+  store: {style: {stroke: "#e0a44a"; stroke-width: 2}}
+}
+
+entry: Entry points {
+  direction: down
+  script: "aur-chat script · python -m aur_chat · desktop entry" {class: entry}
+  gui: "gui.py · QApplication tray host, one instance via QLockFile, injects XDG and DBus env" {class: entry}
+  main_qml: "Main.qml · roster, filter, settings, tabs, dual-window toggle" {class: entry}
+  chat_win: "ChatWindow.qml · second window in dual mode, closing it restores one window" {class: entry}
+  chat_pane: "ChatPane.qml · bubble list, composer, BBCode and emoticon rendering" {class: entry}
+}
+
+core: Core {
+  direction: down
+  backend: "backend.py 2100 lines · QObject bridge the whole UI talks to" {class: core}
+  poll: "friends poll timer · carries dropped persona fields forward, retries an empty roster" {class: core}
+  stream: "chat_stream.py · one long-lived aurelia chat events QProcess, JSON line per event" {class: core}
+  wrap: "aurelia.py · subprocess wrapper, every call is aurelia subcommand plus --json" {class: core}
+  fmt: "chat_format.py · outgoing escape and /code /pre /quote /spoiler, incoming BBCode to HTML" {class: core}
+  vdf: "steam_shortcuts.py + launch_options.py · read shortcuts.vdf and localconfig.vdf" {class: core}
+  notify: "notify.py · notify-send plus canberra or pw-play message sound" {class: core}
+}
+
+state: State {
+  direction: down
+  ui: "~/.config/aur-chat/state.json · open tabs, window mode, hide offline, font sizes" {class: store}
+  icons: "~/.cache/aur-chat/emoticons · CDN images cached after first fetch" {class: store}
+  log: "~/.cache/aur-chat/friends-debug.log · sync timeline, capped at 1 MiB" {class: store}
+  sess: "~/.config/Aurelia/session.json · Steam session owned by the daemon, GUI never reads it" {class: store}
+}
+
+external: External {
+  direction: down
+  daemon: "aurelia daemon · friends, chat history, send, send-image, events stream" {class: ext}
+  steam: "Steam network via the daemon · roster, persona, presence, rich presence" {class: ext}
+  cdn: "Steam community CDN · emoticon and sticker images" {class: ext}
+  desktop: "freedesktop notifications and system sound player" {class: ext}
+  games: "game launch · steam -applaunch, or aurelia play when a launch script exists" {class: ext}
+}
+
+entry -> core
+core -> state
+core -> external
